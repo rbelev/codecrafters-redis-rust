@@ -3,14 +3,19 @@ mod resp;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::ops::Add;
 use std::thread;
 use std::str;
+use std::time;
+use std::time::{Duration, SystemTime};
 use crate::resp::Value;
 
-fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
+struct StoredValue {
+    value: Value,
+    expiry: Option<time::SystemTime>
+}
 
+fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
     for stream in listener.incoming() {
@@ -20,7 +25,7 @@ fn main() {
 
                 thread::spawn(move || {
                     let mut read_buffer = [0;512];
-                    let mut store: HashMap<String, String> = HashMap::new();
+                    let mut store: HashMap<String, StoredValue> = HashMap::new();
 
                     loop {
                         let read_count = stream.read(&mut read_buffer).unwrap();
@@ -44,7 +49,7 @@ fn main() {
 /*
  * *1\r\n$4\r\nPING\r\n
  */
-fn process(buff: String, store: &mut HashMap<String, String>) -> String {
+fn process(buff: String, store: &mut HashMap<String, StoredValue>) -> String {
     println!("process: {}", buff);
 
     let mut lines = buff.split("\r\n");
@@ -61,7 +66,7 @@ fn process(buff: String, store: &mut HashMap<String, String>) -> String {
 }
 
 
-fn eval_command(segments: &Value, store: &mut HashMap<String, String>) -> String {
+fn eval_command(segments: &Value, store: &mut HashMap<String, StoredValue>) -> String {
     println!("eval_command: {:?}", segments);
     match segments {
         Value::Array(arr) => {
@@ -80,26 +85,58 @@ fn eval_command(segments: &Value, store: &mut HashMap<String, String>) -> String
     }
 }
 
-fn eval_set(params: &[Value], store: &mut HashMap<String, String>) -> String {
+fn eval_set(params: &[Value], store: &mut HashMap<String, StoredValue>) -> String {
+    println!("set params: {:?}", params);
     match params {
         [Value::BulkString(name), Value::BulkString(value)] => {
-            store.insert(String::from(name), String::from(value));
+            store.insert(String::from(name), StoredValue { value: Value::BulkString(String::from(value)), expiry: None });
+        },
+        [
+            Value::BulkString(name),
+            Value::BulkString(value),
+            Value::BulkString(_cmd),
+            Value::BulkString(str_px)] => {
+                let px = str_px.parse::<u64>().unwrap();
+                store.insert(
+                    String::from(name),
+                 StoredValue {
+                     value: Value::BulkString(String::from(value)),
+                     expiry: Some(SystemTime::now().add(Duration::from_millis(px)))
+                    }
+                );
         },
         _ => {},
     };
 
     Value::SimpleString(String::from("OK")).serialize()
 }
-fn eval_get(params: &[Value], store: &HashMap<String, String>) -> String {
+fn eval_get(params: &[Value], store: &HashMap<String, StoredValue>) -> String {
     println!("get params: {:?}", params);
-    let value = match params {
+    let value: Option<&StoredValue> = match params {
         [Value::BulkString(name)] => {
-            store.get(name).unwrap()
+            store.get(name)
         },
-        _ => panic!("not set"),
+        _ => None,
     };
+    match value {
+        Some(opt) => {
+            match opt.expiry {
+                Some(time) => {
+                    if time::SystemTime::now() > time {
+                        return String::from(Value::NULL_STRING);
+                    }
 
-    Value::BulkString(String::from(value)).serialize()
+                    opt.value.serialize()
+                },
+                None => opt.value.serialize(),
+            }
+        },
+        None => String::from(Value::NULL_STRING),
+    }
+
+    // Value::NULL_STRING
+
+    // Value::BulkString(String::from(value)).serialize()
 }
 
 fn eval_echo(params: &[Value]) -> String {

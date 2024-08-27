@@ -2,14 +2,18 @@
 pub enum Value {
     SimpleString(String),
     BulkString(String),
+    Integer(i64),
     Array(Vec<Value>),
 }
 
 impl Value {
+    pub const NULL_STRING: &'static str = "$-1\r\n";
+
     pub fn serialize(self: &Self) -> String {
         match self {
             Value::SimpleString(s) => format!("+{}\r\n", s),
             Value::BulkString(s) => format!("${}\r\n{}\r\n", s.chars().count(), s),
+            Value::Integer(i) => format!(":{}\r\n", i),
             Value::Array(v) => {
                 let serialize_values= v.iter()
                     .map(|value: &Value| value.serialize())
@@ -38,6 +42,9 @@ impl Value {
             '$' => {
                 Self::parse_bulk_string(iter, line)
             },
+            ':' => {
+                Self::parse_integer(iter, line)
+            },
             _ => panic!("unsupported command")
         }
     }
@@ -51,6 +58,9 @@ impl Value {
         let word = iter.next().unwrap().to_string();
         Value::BulkString(word)
     }
+    fn parse_integer(_iter: &mut dyn Iterator<Item=&str>, line: &str) -> Value {
+        Value::Integer(line[1..].to_string().parse().unwrap())
+    }
 
     fn parse_array(iter: &mut dyn Iterator<Item=&str>, line: &str) -> Value {
         let array_length = line[1..].to_string().parse().unwrap();
@@ -58,7 +68,6 @@ impl Value {
 
         for i in 1..=array_length {
             let next_value = Self::parse(iter);
-            println!("parse_array {}/{} got {:?}", i, array_length, next_value);
             arr.push(next_value);
         }
         Value::Array(arr)
