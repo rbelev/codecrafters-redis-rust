@@ -1,0 +1,67 @@
+#[derive(Debug)]
+pub enum Value {
+    SimpleString(String),
+    BulkString(String),
+    Array(Vec<Value>),
+}
+
+impl Value {
+    pub fn serialize(self: &Self) -> String {
+        match self {
+            Value::SimpleString(s) => format!("+{}\r\n", s),
+            Value::BulkString(s) => format!("${}\r\n{}\r\n", s.chars().count(), s),
+            Value::Array(v) => {
+                let serialize_values= v.iter()
+                    .map(|value: &Value| value.serialize())
+                    .collect::<Vec<String>>()
+                    .join("\r\n");
+
+                format!("*{}\r\n{}\r\n", v.len(), serialize_values)
+            }
+        }
+    }
+
+    /*
+     * *1\r\n$4\r\nPING\r\n
+     */
+    pub fn parse(iter: &mut dyn Iterator<Item=&str>) -> Value {
+        let line = iter.next().unwrap();
+        let symbol = line.chars().next().unwrap();
+
+        match symbol {
+            '+' => {
+                Self::parse_simple_string(iter, line)
+            },
+            '*' => {
+                Self::parse_array(iter, line)
+            },
+            '$' => {
+                Self::parse_bulk_string(iter, line)
+            },
+            _ => panic!("unsupported command")
+        }
+    }
+
+    fn parse_simple_string(_iter: &mut dyn Iterator<Item=&str>, line: &str) -> Value {
+        Value::SimpleString(line[1..].to_string())
+    }
+
+    fn parse_bulk_string(iter: &mut dyn Iterator<Item=&str>, line: &str) -> Value {
+        let _bytes: u64 = line[1..].to_string().parse().unwrap();
+        let word = iter.next().unwrap().to_string();
+        Value::BulkString(word)
+    }
+
+    fn parse_array(iter: &mut dyn Iterator<Item=&str>, line: &str) -> Value {
+        let array_length = line[1..].to_string().parse().unwrap();
+        let mut arr: Vec<Value> = Vec::with_capacity(array_length);
+
+        for i in 1..=array_length {
+            let next_value = Self::parse(iter);
+            println!("parse_array {}/{} got {:?}", i, array_length, next_value);
+            arr.push(next_value);
+        }
+        Value::Array(arr)
+    }
+
+}

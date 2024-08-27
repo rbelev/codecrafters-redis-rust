@@ -1,7 +1,11 @@
+mod resp;
+
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
 use std::str;
+use crate::resp::Value;
 
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -16,6 +20,7 @@ fn main() {
 
                 thread::spawn(move || {
                     let mut read_buffer = [0;512];
+                    let mut store: HashMap<String, String> = HashMap::new();
 
                     loop {
                         let read_count = stream.read(&mut read_buffer).unwrap();
@@ -24,9 +29,7 @@ fn main() {
                         }
                         let command = str::from_utf8(&read_buffer).unwrap().to_string();
 
-                        let break_down = parse_command(command);
-                        let response = eval_command(&break_down);
-
+                        let response = process(command, &mut store);
                         stream.write(&*response.into_bytes()).unwrap();
                     }
                 });
@@ -41,42 +44,68 @@ fn main() {
 /*
  * *1\r\n$4\r\nPING\r\n
  */
-fn parse_command(buff: String) -> Vec<String> {
-    // TODO: handle the length encoding lines.
-    let mut pieces = buff.split("\r\n");
-    let array_len = pieces.next().unwrap()[1..].parse::<usize>().unwrap();
+fn process(buff: String, store: &mut HashMap<String, String>) -> String {
+    println!("process: {}", buff);
 
-    let mut cmd_buffer: Vec<String> = Vec::with_capacity(array_len);
-    pieces.next().unwrap();
+    let mut lines = buff.split("\r\n");
+    let parsed_value = Value::parse(&mut lines);
+    println!("parsed: {:?}", parsed_value);
+    eval_command(&parsed_value, store)
 
-    let cmd = pieces.next().unwrap().to_ascii_uppercase();
-    cmd_buffer.push(cmd);
+    // match parsed_value {
+    //     Value::Array => {
+    //         eval_command(&parsed_value)
+    //     },
+    //     _ => panic!("commands from client always expected to be an array")
+    // }
+}
 
-    for piece in pieces {
-        if piece.starts_with('$') {
-            continue;
-        }
-        cmd_buffer.push(piece.to_string());
+
+fn eval_command(segments: &Value, store: &mut HashMap<String, String>) -> String {
+    println!("eval_command: {:?}", segments);
+    match segments {
+        Value::Array(arr) => {
+            println!("eval_command array: {:?}", arr);
+
+            match &arr[0] {
+                Value::BulkString(cmd) if cmd == "ECHO" => eval_echo(&arr[1..]),
+                Value::BulkString(cmd) if cmd == "PING" => eval_ping(),
+                Value::BulkString(cmd) if cmd == "SET" => eval_set(&arr[1..], store),
+                Value::BulkString(cmd) if cmd == "GET" => eval_get(&arr[1..], store),
+                Value::BulkString(cmd) => panic!("Not a valid command: {}", cmd),
+                _ => panic!("non-simple string first: {}", &arr[0].serialize()),
+            }
+        },
+        _ => panic!("non-array command"),
     }
-
-    cmd_buffer
 }
 
+fn eval_set(params: &[Value], store: &mut HashMap<String, String>) -> String {
+    match params {
+        [Value::BulkString(name), Value::BulkString(value)] => {
+            store.insert(String::from(name), String::from(value));
+        },
+        _ => {},
+    };
 
-fn eval_command(segments: &Vec<String>) -> String {
-    match &segments[0] {
-        cmd if cmd == "ECHO" => eval_echo(segments),
-        cmd if cmd == "PING" => eval_ping(segments),
-        cmd => panic!("Not a valid command: {}", cmd)
-    }
+    Value::SimpleString(String::from("OK")).serialize()
+}
+fn eval_get(params: &[Value], store: &HashMap<String, String>) -> String {
+    println!("get params: {:?}", params);
+    let value = match params {
+        [Value::BulkString(name)] => {
+            store.get(name).unwrap()
+        },
+        _ => panic!("not set"),
+    };
+
+    Value::BulkString(String::from(value)).serialize()
 }
 
-fn eval_echo(segments: &Vec<String>) -> String {
-    let res = format!("${}\r\n{}\r\n", &segments[1].chars().count(), &segments[1]);
-    println!("{}", res);
-    res
+fn eval_echo(params: &[Value]) -> String {
+    params[0].serialize()
 }
 
-fn eval_ping(_segments: &Vec<String>) -> String {
-    String::from("+PONG\r\n")
+fn eval_ping() -> String {
+    Value::SimpleString(String::from("PONG")).serialize()
 }
