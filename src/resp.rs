@@ -66,7 +66,7 @@ impl Value {
         let array_length = line[1..].to_string().parse().unwrap();
         let mut arr: Vec<Value> = Vec::with_capacity(array_length);
 
-        for i in 1..=array_length {
+        for _i in 1..=array_length {
             let next_value = Self::parse(iter);
             arr.push(next_value);
         }
