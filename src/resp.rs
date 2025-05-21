@@ -9,7 +9,7 @@ pub enum Value {
 impl Value {
     pub const NULL_STRING: &'static str = "$-1\r\n";
 
-    pub fn serialize(self: &Self) -> String {
+    pub fn serialize(&self) -> String {
         match self {
             Value::SimpleString(s) => format!("+{}\r\n", s),
             Value::BulkString(s) => format!("${}\r\n{}\r\n", s.chars().count(), s),
@@ -18,8 +18,7 @@ impl Value {
                 let serialize_values = v
                     .iter()
                     .map(|value: &Value| value.serialize())
-                    .collect::<Vec<String>>()
-                    .join("");
+                    .collect::<String>();
 
                 format!("*{}\r\n{}", v.len(), serialize_values)
             }

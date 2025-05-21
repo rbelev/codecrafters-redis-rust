@@ -1,9 +1,11 @@
+mod config;
 mod db;
 mod resp;
 
 use crate::db::{Redis, DB};
 use crate::resp::Value;
 use std::env;
+use std::error::Error;
 use std::ops::Add;
 use std::str;
 use std::sync::{Arc, Mutex};
@@ -12,13 +14,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
 
-    let mut other = env::args();
-    other.next();
-    let redis: Redis = Arc::new(Mutex::new(DB::new(&mut other)));
-    // let redis: Redis = Arc::new(Mutex::new(DB::new(&args[1..])));
+    let args = env::args().skip(1).collect::<Vec<String>>();
+    let db = DB::new(args).parse_rdb();
+    let redis: Redis = Arc::new(Mutex::new(db));
 
     loop {
         let (mut socket, _) = listener.accept().await?;
@@ -38,9 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 let command = str::from_utf8(&read_buffer[..read_count]).expect("utf8 buffer");
 
-                let redis = redis.clone();
-
-                let response = process(command, redis);
+                let response = process(command, &redis);
                 if let Err(e) = socket.write_all(&response.into_bytes()).await {
                     eprintln!("failed to write to socket; err = {:?}", e);
                     return;
@@ -53,14 +52,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /*
  * *1\r\n$4\r\nPING\r\n
  */
-fn process(buff: &str, store: Redis) -> String {
+fn process(buff: &str, store: &Redis) -> String {
     let mut lines = buff.split("\r\n");
     let parsed_value = Value::parse(&mut lines);
 
     eval_command(&parsed_value, store)
 }
 
-fn eval_command(segments: &Value, store: Redis) -> String {
+fn eval_command(segments: &Value, store: &Redis) -> String {
     match segments {
         Value::Array(arr) => {
             println!("eval_command array-array-array: {:?}", arr);
@@ -70,6 +69,7 @@ fn eval_command(segments: &Value, store: Redis) -> String {
                 Value::BulkString(cmd) if cmd == "PING" => eval_ping(),
                 Value::BulkString(cmd) if cmd == "SET" => eval_set(&arr[1..], store),
                 Value::BulkString(cmd) if cmd == "GET" => eval_get(&arr[1..], store),
+                Value::BulkString(cmd) if cmd == "KEYS" => eval_keys(&arr[1..], store),
                 Value::BulkString(cmd) if cmd == "CONFIG" => eval_config(&arr[1..], store),
                 Value::BulkString(cmd) => panic!("Not a valid command: {}", cmd),
                 _ => panic!("non-BulkString first: {}", &arr[0].serialize()),
@@ -79,7 +79,7 @@ fn eval_command(segments: &Value, store: Redis) -> String {
     }
 }
 
-fn eval_set(params: &[Value], store: Redis) -> String {
+fn eval_set(params: &[Value], store: &Redis) -> String {
     println!("set params: {:?}", params);
     let mut store = store.lock().unwrap();
 
@@ -109,7 +109,7 @@ fn eval_set(params: &[Value], store: Redis) -> String {
 
     Value::SimpleString(String::from("OK")).serialize()
 }
-fn eval_get(params: &[Value], store: Redis) -> String {
+fn eval_get(params: &[Value], store: &Redis) -> String {
     println!("get params: {:?}", params);
     let store = store.lock().unwrap();
 
@@ -130,10 +130,6 @@ fn eval_get(params: &[Value], store: Redis) -> String {
         },
         None => String::from(Value::NULL_STRING),
     }
-
-    // Value::NULL_STRING
-
-    // Value::BulkString(String::from(value)).serialize()
 }
 
 fn eval_echo(params: &[Value]) -> String {
@@ -144,7 +140,7 @@ fn eval_ping() -> String {
     Value::SimpleString(String::from("PONG")).serialize()
 }
 
-fn eval_config(params: &[Value], store: Redis) -> String {
+fn eval_config(params: &[Value], store: &Redis) -> String {
     println!("eval_config: {:?}", params);
     let store = store.lock().unwrap();
 
@@ -156,13 +152,25 @@ fn eval_config(params: &[Value], store: Redis) -> String {
     };
     println!("config_value: {:?}", config_value);
 
-    //let arr = Vec::with_capacity(2);
-    //arr.push(params[0]);
-    //arr.push(config_value);
     Value::Array(vec![
         params[1].clone(),
         Value::BulkString(String::from(config_value)),
     ])
     .serialize()
-    // Value::Array(arr).serialize()
+}
+
+fn eval_keys(params: &[Value], store: &Redis) -> String {
+    let store = store.lock().unwrap();
+
+    match &params[0] {
+        Value::BulkString(all) if all == "*" => {
+            let all = store
+                .db
+                .keys()
+                .map(|key| Value::BulkString(key.clone()))
+                .collect::<Vec<Value>>();
+            Value::Array(all).serialize()
+        }
+        _ => panic!("eval_keys: only * is supported: {:?}", params),
+    }
 }
