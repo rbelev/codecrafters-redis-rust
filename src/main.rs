@@ -119,14 +119,22 @@ fn eval_get(params: &[Value], store: &Redis) -> String {
     };
     match value {
         Some(opt) => match opt.expiry {
-            Some(time) => {
-                if SystemTime::now() > time {
+            Some(expires_at) => {
+                if SystemTime::now() >= expires_at {
                     return String::from(Value::NULL_STRING);
                 }
+                println!("Not expired: {expires_at:?} > {:?}", SystemTime::now());
+                println!(
+                    "Time till Expiry: {:?}",
+                    expires_at.duration_since(SystemTime::now())
+                );
 
                 opt.value.serialize()
             }
-            None => opt.value.serialize(),
+            None => {
+                println!("No expiry set");
+                opt.value.serialize()
+            }
         },
         None => String::from(Value::NULL_STRING),
     }

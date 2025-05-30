@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::resp::Value;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::fs;
 use std::iter::Peekable;
 use std::sync::{Arc, Mutex};
@@ -76,14 +77,11 @@ impl DB {
             }
 
             let expiry = Self::get_expiry(&mut byte_cursor);
-            println!("got expiry {:?}", expiry);
-
             let value_type = byte_cursor.next().unwrap();
-            println!("got value_type {:#04X?}", value_type);
             let key = Self::get_string(&mut byte_cursor);
-            // println!("got key {key}");
             let value = Self::get_string(&mut byte_cursor);
-            // println!("got value {value}");
+
+            println!("inserting {key}:{value} {expiry:?} type={value_type:#04X?}");
 
             self.db.insert(
                 key,
@@ -125,13 +123,15 @@ impl DB {
             Some(0xFD) => {
                 iter.next();
                 // FD $unsigned-int            # "expiry time in seconds", followed by 4 byte unsigned int
-                let expiry_sec = Self::extract_u32(iter) as u64;
-                Some(UNIX_EPOCH + Duration::from_secs(expiry_sec))
+                let expiry_sec = Self::extract_u32(iter);
+                println!("Expiry sec: {expiry_sec}");
+                Some(UNIX_EPOCH + Duration::from_secs(expiry_sec as u64))
             }
             Some(0xFC) => {
                 iter.next();
                 // FC $unsigned long           # "expiry time in ms", followed by 8 byte unsigned long
                 let expiry_ms = Self::extract_u64(iter);
+                println!("Expiry ms: {expiry_ms}");
                 Some(UNIX_EPOCH + Duration::from_millis(expiry_ms))
             }
             _ => None,
@@ -140,7 +140,7 @@ impl DB {
 
     fn get_string(iter: &mut dyn Iterator<Item = u8>) -> String {
         let size = Self::get_length_encoding(iter);
-        println!("get_string: attempting {size:?} bytes");
+        // println!("get_string: attempting {size:?} bytes");
         let mut res = String::with_capacity(size as usize);
         for _ in 0..size {
             res.push(iter.next().unwrap() as char);
@@ -150,7 +150,7 @@ impl DB {
 
     fn extract_u16(iter: &mut dyn Iterator<Item = u8>) -> u16 {
         let bytes = [iter.next().unwrap(), iter.next().unwrap()];
-        u16::from_be_bytes(bytes)
+        u16::from_le_bytes(bytes)
     }
     fn extract_u32(iter: &mut dyn Iterator<Item = u8>) -> u32 {
         let bytes = [
@@ -159,7 +159,7 @@ impl DB {
             iter.next().unwrap(),
             iter.next().unwrap(),
         ];
-        u32::from_be_bytes(bytes)
+        u32::from_le_bytes(bytes)
     }
     fn extract_u64(iter: &mut dyn Iterator<Item = u8>) -> u64 {
         let bytes = [
@@ -172,7 +172,7 @@ impl DB {
             iter.next().unwrap(),
             iter.next().unwrap(),
         ];
-        u64::from_be_bytes(bytes)
+        u64::from_le_bytes(bytes)
     }
 }
 
