@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq)]
@@ -10,18 +11,25 @@ impl Config {
     pub const DEFAULT_DATA_DIR: &'static str = "/tmp/redis-data";
     pub const DEFAULT_DATA_FILE: &'static str = "rdbfile.rdb";
 
-    pub fn new(mut args: Vec<String>) -> Config {
-        let dir: String = match args.iter().position(|arg| arg == "--dir") {
-            Some(pos) => args.remove(pos + 1),
-            None => String::from(Self::DEFAULT_DATA_DIR),
-        };
-        let dbfilename: String = match args.iter().position(|arg| arg == "--dbfilename") {
-            Some(pos) => args.remove(pos + 1),
-            None => String::from(Self::DEFAULT_DATA_FILE),
-        };
+    pub fn new(args: Vec<String>) -> Config {
+        let mut parsed: HashMap<String, String> = HashMap::new();
+        let mut iter = args.into_iter();
+
+        while let Some(flag) = iter.next() {
+            if flag.starts_with("--") {
+                if let Some(value) = iter.next() {
+                    parsed.insert(flag, value);
+                }
+            }
+        }
+
         Config {
-            dir,
-            dbfilename,
+            dir: parsed
+                .remove("--dir")
+                .unwrap_or_else(|| String::from(Self::DEFAULT_DATA_DIR)),
+            dbfilename: parsed
+                .remove("--dbfilename")
+                .unwrap_or_else(|| String::from(Self::DEFAULT_DATA_FILE)),
             // ..Self::default()
         }
     }
@@ -45,6 +53,12 @@ mod test {
     use super::*;
 
     #[test]
+    fn test_default_args() {
+        let config = Config::new(Vec::new());
+        assert_eq!(config, Config::default());
+    }
+
+    #[test]
     fn test_custom_args() {
         let my_dir = String::from("/tmp/my-data");
         let my_db_file = String::from("my_redis.rdb");
@@ -66,8 +80,16 @@ mod test {
     }
 
     #[test]
-    fn test_default_args() {
-        let config = Config::new(Vec::new());
-        assert_eq!(config, Config::default());
+    fn test_partial_args() {
+        let my_dir = String::from("/tmp/my-data-2");
+        let config = Config::new(vec!["--dir".to_string(), my_dir.clone()]);
+
+        assert_eq!(
+            config,
+            Config {
+                dir: my_dir,
+                ..Default::default()
+            }
+        )
     }
 }
