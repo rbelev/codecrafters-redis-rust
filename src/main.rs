@@ -119,6 +119,17 @@ fn eval_get(params: &[Value], store: MutexGuard<DB>) -> Value {
         Some(opt) if !opt.is_expired() => opt.value.clone(),
         _ => Value::SimpleString(Value::NULL_STRING.to_string()),
     }
+
+    /* let chain for rust 1.88 2024 version.
+    if let Some(Value::BulkString(val)) = params.first()
+        && let Some(stored) = store.db.get(val)
+        && let Some(value) = stored.get()
+    {
+        value.clone()
+    } else {
+        Value::SimpleString(Value::NULL_STRING.to_string())
+    }
+    */
 }
 
 fn eval_echo(params: &[Value]) -> Value {

@@ -19,6 +19,23 @@ pub struct StoredValue {
     pub expiry: Option<SystemTime>,
 }
 
+impl StoredValue {
+    pub fn is_expired(&self) -> bool {
+        match self.expiry {
+            Some(expiry) => expiry > SystemTime::now(),
+            None => false,
+        }
+    }
+
+    pub fn get(&self) -> Option<&Value> {
+        if self.is_expired() {
+            None
+        } else {
+            Some(&self.value)
+        }
+    }
+}
+
 impl DB {
     pub fn new(args: Vec<String>) -> Self {
         DB {
