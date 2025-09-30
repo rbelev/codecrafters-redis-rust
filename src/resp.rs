@@ -28,7 +28,10 @@ impl Value {
     /*
      * *1\r\n$4\r\nPING\r\n
      */
-    pub fn parse(iter: &mut dyn Iterator<Item = &str>) -> Value {
+    pub fn parse<'a, I>(iter: &mut I) -> Value
+    where
+        I: Iterator<Item = &'a str>,
+    {
         let line = iter.next().unwrap();
         let symbol = line.chars().next().unwrap();
 
@@ -41,20 +44,32 @@ impl Value {
         }
     }
 
-    fn parse_simple_string(_iter: &mut dyn Iterator<Item = &str>, line: &str) -> Value {
+    fn parse_simple_string<'a, I>(_iter: &mut I, line: &str) -> Value
+    where
+        I: Iterator<Item = &'a str>,
+    {
         Value::SimpleString(line[1..].to_string())
     }
 
-    fn parse_bulk_string(iter: &mut dyn Iterator<Item = &str>, line: &str) -> Value {
+    fn parse_bulk_string<'a, I>(iter: &mut I, line: &str) -> Value
+    where
+        I: Iterator<Item = &'a str>,
+    {
         let _bytes: u64 = line[1..].to_string().parse().unwrap();
         let word = iter.next().unwrap().to_string();
         Value::BulkString(word)
     }
-    fn parse_integer(_iter: &mut dyn Iterator<Item = &str>, line: &str) -> Value {
+    fn parse_integer<'a, I>(_iter: I, line: &str) -> Value
+    where
+        I: Iterator<Item = &'a str>,
+    {
         Value::Integer(line[1..].to_string().parse().unwrap())
     }
 
-    fn parse_array(iter: &mut dyn Iterator<Item = &str>, line: &str) -> Value {
+    fn parse_array<'a, I>(iter: &mut I, line: &str) -> Value
+    where
+        I: Iterator<Item = &'a str>,
+    {
         let array_length = line[1..].to_string().parse().unwrap();
         let mut arr: Vec<Value> = Vec::with_capacity(array_length);
 

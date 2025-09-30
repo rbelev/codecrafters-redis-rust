@@ -1,3 +1,4 @@
+mod commands;
 mod config;
 mod db;
 mod resp;
@@ -39,9 +40,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 };
                 let command = str::from_utf8(&read_buffer[..read_count]).expect("utf8 buffer");
 
-                let response = process(command, &redis);
+                let response = process(command, &redis).unwrap();
                 if let Err(e) = socket.write_all(&response.into_bytes()).await {
-                    eprintln!("failed to write to socket; err = {e:?}");
+                    eprintln!("failed to write to socket; err = {e}");
                     return;
                 };
             }
@@ -52,16 +53,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /*
  * *1\r\n$4\r\nPING\r\n
  */
-fn process(buff: &str, store: &Redis) -> String {
-    let mut lines = buff.split("\r\n");
+fn process(buff: &str, store: &Redis) -> Result<String, String> {
+    let mut lines = buff.lines();
     let parsed_value = Value::parse(&mut lines);
 
     let store = store.lock().unwrap();
     let response = eval_command(&parsed_value, store);
-    response.serialize()
+    Ok(response?.serialize())
 }
 
-fn eval_command(segments: &Value, store: MutexGuard<DB>) -> Value {
+fn eval_command(segments: &Value, store: MutexGuard<DB>) -> Result<Value, String> {
     match segments {
         Value::Array(arr) => {
             match &arr[0] {
@@ -72,15 +73,16 @@ fn eval_command(segments: &Value, store: MutexGuard<DB>) -> Value {
                 Value::BulkString(cmd) if cmd == "KEYS" => eval_keys(&arr[1..], store),
                 Value::BulkString(cmd) if cmd == "CONFIG" => eval_config(&arr[1..], store),
                 // Value::BulkString(cmd) if cmd == "INCR" => eval_incr(&arr[1..], store),
-                Value::BulkString(cmd) => panic!("Not a valid command: {cmd}"),
-                _ => panic!("non-BulkString first: {}", &arr[0].serialize()),
+                Value::BulkString(cmd) if cmd == "RPUSH" => commands::rpush(&arr[1..], store),
+                Value::BulkString(cmd) => Err(format!("Not a valid command: {cmd}")),
+                _ => Err(format!("non-BulkString first: {}", &arr[0].serialize())),
             }
         }
-        _ => panic!("non-array command"),
+        _ => Err("non-array command".to_string()),
     }
 }
 
-fn eval_set(params: &[Value], mut store: MutexGuard<DB>) -> Value {
+fn eval_set(params: &[Value], mut store: MutexGuard<DB>) -> Result<Value, String> {
     println!("set params: {params:?}");
 
     match params {
@@ -95,7 +97,9 @@ fn eval_set(params: &[Value], mut store: MutexGuard<DB>) -> Value {
         }
         [Value::BulkString(name), Value::BulkString(value), Value::BulkString(_cmd), Value::BulkString(str_px)] =>
         {
-            let px = str_px.parse::<u64>().unwrap();
+            let px = str_px
+                .parse::<u64>()
+                .map_err(|err| format!("invalid px: {err}"))?;
             store.db.insert(
                 String::from(name),
                 db::StoredValue {
@@ -107,17 +111,17 @@ fn eval_set(params: &[Value], mut store: MutexGuard<DB>) -> Value {
         _ => {}
     };
 
-    Value::SimpleString(String::from("OK"))
+    Ok(Value::SimpleString("OK".to_string()))
 }
-fn eval_get(params: &[Value], store: MutexGuard<DB>) -> Value {
+fn eval_get(params: &[Value], store: MutexGuard<DB>) -> Result<Value, String> {
     let value: Option<&db::StoredValue> = match params.first() {
         Some(Value::BulkString(name)) => store.db.get(name),
         _ => None,
     };
 
     match value {
-        Some(opt) if !opt.is_expired() => opt.value.clone(),
-        _ => Value::SimpleString(Value::NULL_STRING.to_string()),
+        Some(opt) if !opt.is_expired() => Ok(opt.value.clone()),
+        _ => Ok(Value::SimpleString(Value::NULL_STRING.to_string())),
     }
 
     /* let chain for rust 1.88 2024 version.
@@ -132,27 +136,32 @@ fn eval_get(params: &[Value], store: MutexGuard<DB>) -> Value {
     */
 }
 
-fn eval_echo(params: &[Value]) -> Value {
-    params[0].clone()
+fn eval_echo(params: &[Value]) -> Result<Value, String> {
+    Ok(params[0].clone())
 }
 
-fn eval_ping() -> Value {
-    Value::SimpleString(String::from("PONG"))
+fn eval_ping() -> Result<Value, String> {
+    Ok(Value::SimpleString("PONG".to_string()))
 }
 
-fn eval_config(params: &[Value], store: MutexGuard<DB>) -> Value {
+fn eval_config(params: &[Value], store: MutexGuard<DB>) -> Result<Value, String> {
     // Assumed GET, so skipping past [0].
     let field = params[1].clone();
     let config_value = match &field {
         Value::BulkString(tar) if tar == "dir" => &store.config.dir,
         Value::BulkString(tar) if tar == "dbfilename" => &store.config.dbfilename,
-        bad_tar => panic!("unknown config: {}", bad_tar.serialize()),
+        bad_tar => {
+            return Err(format!("unknown config: {}", bad_tar.serialize()));
+        }
     };
 
-    Value::Array(vec![field, Value::BulkString(config_value.clone())])
+    Ok(Value::Array(vec![
+        field,
+        Value::BulkString(config_value.clone()),
+    ]))
 }
 
-fn eval_keys(params: &[Value], store: MutexGuard<DB>) -> Value {
+fn eval_keys(params: &[Value], store: MutexGuard<DB>) -> Result<Value, String> {
     match &params[0] {
         Value::BulkString(all) if all == "*" => {
             let all = store
@@ -160,7 +169,7 @@ fn eval_keys(params: &[Value], store: MutexGuard<DB>) -> Value {
                 .keys()
                 .map(|key| Value::BulkString(key.clone()))
                 .collect::<Vec<Value>>();
-            Value::Array(all)
+            Ok(Value::Array(all))
         }
         _ => panic!("eval_keys: only * is supported: {params:?}"),
     }

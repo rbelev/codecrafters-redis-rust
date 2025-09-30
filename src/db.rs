@@ -1,7 +1,6 @@
 use crate::config::Config;
 use crate::resp::Value;
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::fs;
 use std::iter::Peekable;
 use std::sync::{Arc, Mutex};
@@ -22,16 +21,16 @@ pub struct StoredValue {
 impl StoredValue {
     pub fn is_expired(&self) -> bool {
         match self.expiry {
-            Some(expiry) => expiry > SystemTime::now(),
+            Some(expiry) => expiry <= SystemTime::now(),
             None => false,
         }
     }
 
-    pub fn get(&self) -> Option<&Value> {
+    pub fn get(&mut self) -> Option<&mut Value> {
         if self.is_expired() {
             None
         } else {
-            Some(&self.value)
+            Some(&mut self.value)
         }
     }
 }
@@ -41,6 +40,14 @@ impl DB {
         DB {
             config: Config::new(args),
             db: HashMap::new(),
+        }
+    }
+
+    pub fn get(&mut self, key: &str) -> Option<&mut Value> {
+        if let Some(stored) = self.db.get_mut(key) {
+            stored.get()
+        } else {
+            None
         }
     }
 
@@ -79,7 +86,7 @@ impl DB {
             .peekable();
 
         let database_index = byte_cursor.next().unwrap();
-        println!("starting database #{}", database_index);
+        println!("starting database #{database_index}");
 
         if byte_cursor.next() != Some(0xFB) {
             panic!("expected FB after db start");
@@ -112,7 +119,7 @@ impl DB {
         self
     }
 
-    fn get_length_encoding(iter: &mut dyn Iterator<Item = u8>) -> u64 {
+    fn get_length_encoding<I: Iterator<Item = u8>>(iter: &mut I) -> u64 {
         let n = iter.next().unwrap();
         match n & 0xC0 {
             0x00 => (n & 0x3F) as u64,
@@ -155,21 +162,17 @@ impl DB {
         }
     }
 
-    fn get_string(iter: &mut dyn Iterator<Item = u8>) -> String {
+    fn get_string<I: Iterator<Item = u8>>(iter: &mut I) -> String {
         let size = Self::get_length_encoding(iter);
-        // println!("get_string: attempting {size:?} bytes");
-        let mut res = String::with_capacity(size as usize);
-        for _ in 0..size {
-            res.push(iter.next().unwrap() as char);
-        }
-        res
+        let bytes: Vec<u8> = (0..size).map(|_| iter.next().unwrap()).collect();
+        String::from_utf8(bytes).unwrap()
     }
 
-    fn extract_u16(iter: &mut dyn Iterator<Item = u8>) -> u16 {
+    fn extract_u16<I: Iterator<Item = u8>>(iter: &mut I) -> u16 {
         let bytes = [iter.next().unwrap(), iter.next().unwrap()];
         u16::from_le_bytes(bytes)
     }
-    fn extract_u32(iter: &mut dyn Iterator<Item = u8>) -> u32 {
+    fn extract_u32<I: Iterator<Item = u8>>(iter: &mut I) -> u32 {
         let bytes = [
             iter.next().unwrap(),
             iter.next().unwrap(),
@@ -178,7 +181,7 @@ impl DB {
         ];
         u32::from_le_bytes(bytes)
     }
-    fn extract_u64(iter: &mut dyn Iterator<Item = u8>) -> u64 {
+    fn extract_u64<I: Iterator<Item = u8>>(iter: &mut I) -> u64 {
         let bytes = [
             iter.next().unwrap(),
             iter.next().unwrap(),
