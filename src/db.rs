@@ -26,11 +26,11 @@ impl StoredValue {
         }
     }
 
-    pub fn get(&mut self) -> Option<&mut Value> {
+    pub fn get(&self) -> Option<&Value> {
         if self.is_expired() {
             None
         } else {
-            Some(&mut self.value)
+            Some(&self.value)
         }
     }
 }
@@ -43,13 +43,13 @@ impl DB {
         }
     }
 
-    pub fn get(&mut self, key: &str) -> Option<&mut Value> {
-        if let Some(stored) = self.db.get_mut(key) {
-            stored.get()
-        } else {
-            None
-        }
-    }
+    // pub fn get(&mut self, key: &str) -> Option<&mut Value> {
+    //     if let Some(stored) = self.db.get_mut(key) {
+    //         stored.get()
+    //     } else {
+    //         None
+    //     }
+    // }
 
     fn load_rdb(&self) -> Vec<u8> {
         let path = self.config.rbd();

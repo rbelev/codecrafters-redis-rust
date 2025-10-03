@@ -1,5 +1,6 @@
 #[derive(Debug, Clone)]
 pub enum Value {
+    NullString,
     SimpleString(String),
     BulkString(String),
     Integer(i64),
@@ -11,6 +12,7 @@ impl Value {
 
     pub fn serialize(&self) -> String {
         match self {
+            Value::NullString => Value::NULL_STRING.to_string(),
             Value::SimpleString(s) => format!("+{}\r\n", s),
             Value::BulkString(s) => format!("${}\r\n{}\r\n", s.chars().count(), s),
             Value::Integer(i) => format!(":{}\r\n", i),
@@ -28,55 +30,62 @@ impl Value {
     /*
      * *1\r\n$4\r\nPING\r\n
      */
-    pub fn parse<'a, I>(iter: &mut I) -> Value
+    pub fn parse<'a, I>(iter: &mut I) -> Option<Value>
     where
         I: Iterator<Item = &'a str>,
     {
-        let line = iter.next().unwrap();
-        let symbol = line.chars().next().unwrap();
+        let line = iter.next()?;
 
-        match symbol {
-            '+' => Self::parse_simple_string(iter, line),
-            '*' => Self::parse_array(iter, line),
-            '$' => Self::parse_bulk_string(iter, line),
-            ':' => Self::parse_integer(iter, line),
-            _ => panic!("unsupported command"),
+        match line.chars().next() {
+            Some('+') => Self::parse_simple_string(iter, line),
+            Some('*') => Self::parse_array(iter, line),
+            Some('$') => Self::parse_bulk_string(iter, line),
+            Some(':') => Self::parse_integer(iter, line),
+            _ => None,
         }
     }
 
-    fn parse_simple_string<'a, I>(_iter: &mut I, line: &str) -> Value
+    fn parse_simple_string<'a, I>(_iter: &mut I, line: &str) -> Option<Value>
     where
         I: Iterator<Item = &'a str>,
     {
-        Value::SimpleString(line[1..].to_string())
+        Some(Value::SimpleString(line[1..].to_string()))
     }
 
-    fn parse_bulk_string<'a, I>(iter: &mut I, line: &str) -> Value
+    fn parse_bulk_string<'a, I>(iter: &mut I, line: &str) -> Option<Value>
     where
         I: Iterator<Item = &'a str>,
     {
-        let _bytes: u64 = line[1..].to_string().parse().unwrap();
-        let word = iter.next().unwrap().to_string();
-        Value::BulkString(word)
-    }
-    fn parse_integer<'a, I>(_iter: I, line: &str) -> Value
-    where
-        I: Iterator<Item = &'a str>,
-    {
-        Value::Integer(line[1..].to_string().parse().unwrap())
+        let Ok(_bytes) = line[1..].parse::<u64>() else {
+            return None;
+        };
+        let word = iter.next()?.to_string();
+        Some(Value::BulkString(word))
     }
 
-    fn parse_array<'a, I>(iter: &mut I, line: &str) -> Value
+    fn parse_integer<'a, I>(_iter: I, line: &str) -> Option<Value>
     where
         I: Iterator<Item = &'a str>,
     {
-        let array_length = line[1..].to_string().parse().unwrap();
+        let Ok(integer) = line[1..].parse::<i64>() else {
+            return None;
+        };
+        Some(Value::Integer(integer))
+    }
+
+    fn parse_array<'a, I>(iter: &mut I, line: &str) -> Option<Value>
+    where
+        I: Iterator<Item = &'a str>,
+    {
+        let Ok(array_length) = line[1..].parse::<usize>() else {
+            return None;
+        };
         let mut arr: Vec<Value> = Vec::with_capacity(array_length);
 
         for _i in 1..=array_length {
-            let next_value = Self::parse(iter);
+            let next_value = Self::parse(iter)?;
             arr.push(next_value);
         }
-        Value::Array(arr)
+        Some(Value::Array(arr))
     }
 }
