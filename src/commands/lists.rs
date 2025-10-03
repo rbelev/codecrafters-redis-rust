@@ -1,4 +1,4 @@
-use crate::db::{StoredValue, DB};
+use crate::db::{DB, StoredValue};
 use crate::resp::Value;
 use std::sync::MutexGuard;
 

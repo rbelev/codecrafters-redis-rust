@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq)]
@@ -12,25 +11,21 @@ impl Config {
     pub const DEFAULT_DATA_FILE: &'static str = "rdbfile.rdb";
 
     pub fn new(args: Vec<String>) -> Config {
-        let mut parsed: HashMap<String, String> = HashMap::new();
-        let mut iter = args.into_iter();
+        let directory = args
+            .iter()
+            .position(|arg| arg == "--dir")
+            .and_then(|idx| args.get(idx + 1).cloned())
+            .unwrap_or_else(|| Self::DEFAULT_DATA_DIR.to_string());
 
-        while let Some(flag) = iter.next() {
-            if flag.starts_with("--") {
-                if let Some(value) = iter.next() {
-                    parsed.insert(flag, value);
-                }
-            }
-        }
+        let db_file_name = args
+            .iter()
+            .position(|arg| arg == "--dbfilename")
+            .and_then(|idx| args.get(idx + 1).cloned())
+            .unwrap_or_else(|| Self::DEFAULT_DATA_FILE.to_string());
 
         Config {
-            dir: parsed
-                .remove("--dir")
-                .unwrap_or_else(|| String::from(Self::DEFAULT_DATA_DIR)),
-            dbfilename: parsed
-                .remove("--dbfilename")
-                .unwrap_or_else(|| String::from(Self::DEFAULT_DATA_FILE)),
-            // ..Self::default()
+            dir: directory,
+            dbfilename: db_file_name,
         }
     }
 
